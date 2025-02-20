@@ -1,32 +1,15 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.10)
 
 project(detect_hw_usage LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Create include directory for headers
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Add GPU vendor specific libraries
-if(WIN32)
-    # NVIDIA NVML
-    find_library(NVML_LIBRARY nvml
-        PATHS "$ENV{ProgramFiles}/NVIDIA Corporation/NVSMI"
-        PATH_SUFFIXES "lib" "lib64")
-    
-    # AMD ADL
-    find_path(ADL_INCLUDE_DIR ADL/adl_sdk.h
-        PATHS "$ENV{ProgramFiles}/AMD/ADL_SDK")
-    find_library(ADL_LIBRARY ADL_SDK
-        PATHS "$ENV{ProgramFiles}/AMD/ADL_SDK")
-
-    # Add NvAPI for GeForce cards
-    find_path(NVAPI_INCLUDE_DIR nvapi.h
-        PATHS "${PROJECT_SOURCE_DIR}/external/nvapi")
-    find_library(NVAPI_LIBRARY nvapi64
-        PATHS "${PROJECT_SOURCE_DIR}/external/nvapi")
-else()
+if(UNIX)
     # Linux paths
     find_package(X11 REQUIRED)
     find_package(OpenGL REQUIRED)
@@ -60,16 +43,19 @@ else()
     set(NVML_LIBRARY "")
 endif()
 
-add_library(${PROJECT_NAME}
-    include/gpu_detector.hpp
-    include/nvidia_gpu_detector.hpp
-    include/amd_gpu_detector.hpp
-    include/ram_detector.hpp
+# Add source files
+set(LIB_SOURCES
     src/gpu_detector.cpp
     src/nvidia_gpu_detector.cpp
     src/amd_gpu_detector.cpp
     src/ram_detector.cpp
+    src/storage_detector.cpp
+    src/network_detector.cpp
+    src/cpu_detector.cpp
 )
+
+# Create the library
+add_library(${PROJECT_NAME} STATIC ${LIB_SOURCES})
 
 # Collect all libraries
 set(GPU_LIBS "")
@@ -94,7 +80,7 @@ target_link_libraries(${PROJECT_NAME}
 if(UNIX)
     target_include_directories(${PROJECT_NAME} PRIVATE
         /usr/include/nvidia-current
-        /usr/local/cuda/include  # Or set CUDA include path which contains nvml.h
+        /usr/local/cuda/include
         ${X11_INCLUDE_DIR}
         ${OPENGL_INCLUDE_DIR}
     )
@@ -112,16 +98,39 @@ if(UNIX)
     endif()
 endif()
 
-if(WIN32 AND NVAPI_INCLUDE_DIR)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${NVAPI_INCLUDE_DIR})
-endif()
-
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 
-add_executable(test_program
-                main.cpp)
+# Find required packages
+find_package(Threads REQUIRED)
 
-target_link_libraries(test_program
-    ${PROJECT_NAME}
+# Link against required libraries
+target_link_libraries(${PROJECT_NAME} 
+    PUBLIC
+        Threads::Threads
+        dl
+)
+
+# Create the test executable
+add_executable(test_program main.cpp)
+
+# Link the test program with our library
+target_link_libraries(test_program 
+    PRIVATE 
+        ${PROJECT_NAME}
+)
+
+# Add compile definitions if needed
+if(DEFINED HAS_NVML_SUPPORT)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC HAS_NVML_SUPPORT)
+endif()
+
+if(DEFINED HAS_ADL_SUPPORT)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC HAS_ADL_SUPPORT)
+endif()
+
+# Add include directories
+target_include_directories(${PROJECT_NAME} 
+    PUBLIC 
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
